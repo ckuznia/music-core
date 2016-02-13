@@ -50,14 +50,12 @@ public abstract class AbstractConnection {
 			// Output streams setup
 			log.debug("Setting up output streams...");
 			OutputStream out = socket.getOutputStream();
-			ObjectOutputStream oOutput = new ObjectOutputStream(out);
-			BufferedOutputStream bOutput = new BufferedOutputStream(out);
-			DataOutputStream dOutput = new DataOutputStream(out);
-			outStreams.add(oOutput);
-			outStreams.add(bOutput);
-			outStreams.add(dOutput);
+			outStreams.add(new ObjectOutputStream(out));
+			outStreams.add(new BufferedOutputStream(out));
+			outStreams.add(new DataOutputStream(out));
 			
 			// Flushing output streams
+			out.flush();
 			for(OutputStream stream: outStreams) {
 				stream.flush();
 			}
@@ -67,6 +65,7 @@ public abstract class AbstractConnection {
 			log.debug("Setting up input streams...");
 			InputStream in = socket.getInputStream();
 			inStreams.add(new ObjectInputStream(in));
+			inStreams.add(new BufferedInputStream(in));
 			inStreams.add(new DataInputStream(in));
 			log.debug("Done.");
 			
@@ -82,6 +81,7 @@ public abstract class AbstractConnection {
 			if(stream.getClass() == classType) return stream;
 		}
 		log.error("Input stream " + classType + " could not be found");
+		disconnect();
 		return null;
 	}
 	
@@ -90,6 +90,7 @@ public abstract class AbstractConnection {
 			if(stream.getClass() == classType) return stream;
 		}
 		log.error("Output stream " + classType + " could not be found");
+		disconnect();
 		return null;
 	}
 	
@@ -126,8 +127,31 @@ public abstract class AbstractConnection {
 	}
 	
 	protected void downloadFile(String newPath) {
-		// Retrieving file extension
 		DataInputStream dInput = (DataInputStream) getInput(DataInputStream.class);
+		
+		
+		
+//		// Making sure the file isn't above an allowed limit
+//		if(fileSize > MAX_SIZE_ALLOWED) {
+//			log.error("File size of " + (fileSize / MEGA_BYTE) + "MB is above the allowed limit of " + MAX_SIZE_ALLOWED + "MB. The file download will be CANCELLED", new Exception("File size too large."));
+//			disconnect();
+//			return;
+//		}
+		
+		// TEST
+//		log.debug("Waiting for data... ");
+//		try {
+//			while(dInput.available() == 0) {
+//				try {
+//					Thread.sleep(1);
+//				} catch(Exception e) {}
+//			}
+//		} catch(IOException e) {
+//			log.error("Error waiting for data.", e);
+//		}
+//		log.debug("Data available.");
+		
+		// Retrieving file extension
 		String extension = "";
 		try {
 			extension = dInput.readUTF();
@@ -147,19 +171,11 @@ public abstract class AbstractConnection {
 			return;
 		}
 		
-		// Making sure the file isn't above an allowed limit
-		if(fileSize > MAX_SIZE_ALLOWED) {
-			log.error("File size of " + (fileSize / MEGA_BYTE) + "MB is above the allowed limit of " + MAX_SIZE_ALLOWED + "MB. The file download will be CANCELLED", new Exception("File size too large."));
-			disconnect();
-			return;
-		}
-		
 		// Creating name for file to be downloaded, name is based on current date and time
 		DateFormat dateFormat = new SimpleDateFormat("MM-dd-yyyy_HH-mm-ss");
 		Date date = new Date();
 		String name = dateFormat.format(date) + extension;
 		
-		log.debug("Setting up file streams...");
 		try(
 			// For storing the incoming file (saving)
 			FileOutputStream fOutput = new FileOutputStream(newPath + "/" + name);
@@ -167,11 +183,9 @@ public abstract class AbstractConnection {
 		) {
 			fOutput.flush();
 			bOutput.flush();
-			
-			log.debug("Done.");
-			
+						
 			// For reading the incoming file
-			InputStream input = socket.getInputStream();
+			BufferedInputStream bInput = (BufferedInputStream) getInput(BufferedInputStream.class);
 			
 			// Declaring buffer size
 			int bufferSize = 1024 * 8;
@@ -182,7 +196,7 @@ public abstract class AbstractConnection {
 			
 			int bytesReceived = 0;
 			// Reading from the input stream and saving to a file	
-			for(int bytesRead; bytesReceived < fileSize && (bytesRead = input.read(bytes)) >= 0;) {
+			for(int bytesRead; bytesReceived < fileSize && (bytesRead = bInput.read(bytes)) != -1;) {
 				bOutput.write(bytes, 0, bytesRead);
 				bytesReceived += bytesRead;
 				//log.info("Got " + bytesRead + " bytes [" + bytesReceived + " of " + fileSize + " bytes received].");
@@ -269,7 +283,7 @@ public abstract class AbstractConnection {
 			
 			// Reading the data with read() and sending it with write()
 			// -1 from read() means the end of stream (no more bytes to read)
-			for(int count; (count = bInput.read(bytes)) >= 0;) {
+			for(int count; (count = bInput.read(bytes)) != -1;) {
 				// count is the number of bytes to write,
 				// 0 is the offset
 				// bytes is the actual data to write
@@ -291,6 +305,9 @@ public abstract class AbstractConnection {
 	}
 	
 	public synchronized void disconnect() {
+		// Only disconnect if the connection is not closed
+		if(isClosed()) return;
+		
 		log.debug("*** Disconnecting from " + socket.getInetAddress() + " ***");
 		
 		log.debug("Closing input streams...");

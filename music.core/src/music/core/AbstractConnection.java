@@ -28,6 +28,8 @@ public abstract class AbstractConnection {
 
 	private static final Logger log = LogManager.getLogger(AbstractConnection.class);
 	
+	protected enum Message {DISCONNECT, ACK, CLIENT_UPLOAD_FILE, SERVER_UPLOAD_FILE};
+	
 	private final Socket socket;
 	
 	// Lists for input and output streams that are used (besides the basic InputStream/OutputStream).
@@ -94,7 +96,7 @@ public abstract class AbstractConnection {
 		return null;
 	}
 	
-	protected int readInt() {
+	private int basicReadInt() {
 		try {
 			return ((DataInputStream) getInput(DataInputStream.class)).readInt();
 		} catch (EOFException e) {
@@ -110,7 +112,7 @@ public abstract class AbstractConnection {
 		return -1;
 	}
 	
-	protected void sendInt(int value) {
+	private void basicWriteInt(int value) {
 		final DataOutputStream out = (DataOutputStream) getOutput(DataOutputStream.class);
 		try {
 			out.flush();
@@ -126,40 +128,39 @@ public abstract class AbstractConnection {
 		}
 	}
 	
-	protected void downloadFile(String newPath) {
-		DataInputStream dInput = (DataInputStream) getInput(DataInputStream.class);
+	protected int readInt() {
+		// Read integer like normal
+		int value = basicReadInt();
 		
-		
-		
-//		// Making sure the file isn't above an allowed limit
-//		if(fileSize > MAX_SIZE_ALLOWED) {
-//			log.error("File size of " + (fileSize / MEGA_BYTE) + "MB is above the allowed limit of " + MAX_SIZE_ALLOWED + "MB. The file download will be CANCELLED", new Exception("File size too large."));
-//			disconnect();
-//			return;
-//		}
-		
-		// TEST
-//		log.debug("Waiting for data... ");
-//		try {
-//			while(dInput.available() == 0) {
-//				try {
-//					Thread.sleep(1);
-//				} catch(Exception e) {}
-//			}
-//		} catch(IOException e) {
-//			log.error("Error waiting for data.", e);
-//		}
-//		log.debug("Data available.");
-		
-		// Retrieving file extension
-		String extension = "";
-		try {
-			extension = dInput.readUTF();
-		} catch (IOException e) {
-			log.error("IO Error getting file extension.", e);
-			disconnect();
-			return;
+		// If value read is not an acknowledgement
+		if(value != Message.ACK.ordinal()) {
+			// Send an acknowledgement that value was read
+			basicWriteInt(Message.ACK.ordinal());
 		}
+		return value;
+	}
+	
+	protected void writeInt(int value) {
+		// Send integer like normal
+		basicWriteInt(value);
+		
+		// If value sent is not an acknowledgement
+		if(value != Message.ACK.ordinal()) {
+			// Wait for acknowledgement
+			readACK();
+		}	
+	}
+	
+	protected void readACK() {
+		int value = basicReadInt();
+		if(value != Message.ACK.ordinal()) {
+			log.error("ACK is incorrect, got " + value);
+			disconnect();
+		}
+	}
+	
+	protected void readFile(String newPath) {
+		final DataInputStream dInput = (DataInputStream) getInput(DataInputStream.class);
 		
 		// Getting file size
 		long fileSize = -1;
@@ -167,6 +168,16 @@ public abstract class AbstractConnection {
 			fileSize = dInput.readLong();
 		} catch(IOException e) {
 			log.error("IO Error getting file size from " + socket.getInetAddress(), e);
+			disconnect();
+			return;
+		}
+		
+		// Retrieving file extension
+		String extension = "";
+		try {
+			extension = dInput.readUTF();
+		} catch (IOException e) {
+			log.error("IO Error getting file extension.", e);
 			disconnect();
 			return;
 		}
@@ -216,14 +227,17 @@ public abstract class AbstractConnection {
 			log.error(e);
 			disconnect();
 		}
+		
+		// Send acknowledgement
+		writeInt(Message.ACK.ordinal());
 	}
 	
-	protected void sendFile(String filePath) {
+	protected void writeFile(String filePath) {
 		File file = new File(filePath);
 		
 		// Making sure the file exists
 		if(!file.exists()) {
-			log.error("Cannot send file.", new FileNotFoundException("File " + filePath + " does not exist."));
+			log.error("Cannot send file. File " + filePath + " does not exist.");
 			disconnect();
 			return;
 		}
@@ -237,8 +251,18 @@ public abstract class AbstractConnection {
 			return;
 		}
 		
-		// Sending file extension
+		// Sending file size
 		DataOutputStream dOutput = (DataOutputStream) getOutput(DataOutputStream.class);
+		try {
+			dOutput.writeLong(size);
+			dOutput.flush();
+		} catch(IOException e) {
+			log.error("IO error sending file size.", e);
+			disconnect();
+			return;
+		}
+		
+		// Sending file extension
 		try {
 			String fileName = file.getName();
 			// Parse file name to find out extension type
@@ -249,16 +273,6 @@ public abstract class AbstractConnection {
 			dOutput.flush();
 		} catch(IOException e) {
 			log.error("IO Error when sending file extension.", e);
-			disconnect();
-			return;
-		}
-		
-		// Sending file size
-		try {
-			dOutput.writeLong(size);
-			dOutput.flush();
-		} catch(IOException e) {
-			log.error("IO error sending file size.", e);
 			disconnect();
 			return;
 		}
@@ -302,10 +316,13 @@ public abstract class AbstractConnection {
 			log.error("IO Error.", e);
 			disconnect();
 		}
+		
+		// Wait for acknowledgement
+		readACK();
 	}
 	
 	public synchronized void disconnect() {
-		// Only disconnect if the connection is not closed
+		// Disconnect only if the connection has not been closed
 		if(isClosed()) return;
 		
 		log.debug("*** Disconnecting from " + socket.getInetAddress() + " ***");

@@ -24,11 +24,13 @@ import java.util.Date;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import music.core.binarytree.BinaryTree;
+
 public abstract class AbstractConnection {
 
 	private static final Logger log = LogManager.getLogger(AbstractConnection.class);
 	
-	protected enum Message {DISCONNECT, ACK, CLIENT_UPLOAD_FILE, SERVER_UPLOAD_FILE};
+	protected enum Message {DISCONNECT, ACK, LIBRARY, DATABASE_ADD, DATABASE_RETRIEVE};
 	
 	private final Socket socket;
 	
@@ -315,6 +317,40 @@ public abstract class AbstractConnection {
 		} catch (IOException e) {
 			log.error("IO Error.", e);
 			disconnect();
+		}
+		
+		// Wait for acknowledgement
+		readACK();
+	}
+	
+	protected BinaryTree readTree() {
+		// Download each Track object from the tree
+		final ObjectInputStream objIn = (ObjectInputStream) getInput(ObjectInputStream.class);
+		BinaryTree tree = null;
+		try {
+			tree = (BinaryTree) objIn.readObject();
+		} catch(ClassNotFoundException e) {
+			log.error("Could not find Class.", e);
+		} catch (IOException e) {
+			log.error("IO Exception.", e);
+		}
+		
+		// Send acknowledgement that tree was read
+		writeInt(Message.ACK.ordinal());
+		return tree;
+	}
+	
+	protected void writeTree(BinaryTree tree) {		
+		final ObjectOutputStream objOut = (ObjectOutputStream) getOutput(ObjectOutputStream.class);
+		try {
+			objOut.flush();
+			
+			log.debug("Sending BinaryTree Tracks... ");
+			objOut.writeObject(tree);
+			objOut.flush();
+			log.debug("Done.");
+		} catch (IOException e) {
+			log.error("IO Exception.", e);
 		}
 		
 		// Wait for acknowledgement

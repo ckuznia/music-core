@@ -39,7 +39,6 @@ public abstract class AbstractConnection {
 	private final ArrayList<InputStream> inStreams = new ArrayList<InputStream>();
 	private final ArrayList<OutputStream> outStreams = new ArrayList<OutputStream>();
 	
-	// Establishing the maximum size for files that will be transferred
 	private final long MEGA_BYTE = 1000 * 1000;
 	private final long MAX_SIZE_ALLOWED = 200 * MEGA_BYTE;
 	

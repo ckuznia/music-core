@@ -75,10 +75,7 @@ public class AVReceive2
      * @throws Exception if any error arises during the parsing of the specified
      * <tt>localPortBase</tt>, <tt>remoteHost</tt> and <tt>remotePortBase</tt>
      */
-    private AVReceive2(
-            String localPortBase,
-            String remoteHost, String remotePortBase)
-        throws Exception
+    private AVReceive2(String localPortBase,String remoteHost, String remotePortBase) throws Exception
     {
         this.localPortBase
             = (localPortBase == null)
@@ -118,8 +115,8 @@ public class AVReceive2
              * instance known to LibJitsi, the first available MediaDevice of
              * the specified MediaType will be chosen by MediaService.
              */
-            MediaDevice device
-                = mediaService.getDefaultDevice(mediaType, MediaUseCase.CALL);
+        	
+            MediaDevice device = mediaService.getDefaultDevice(mediaType, MediaUseCase.CALL);
             MediaStream mediaStream = mediaService.createMediaStream(device);
 
             // direction
@@ -324,11 +321,27 @@ public class AVReceive2
             }
         };
 
-    public static void main(String[] args)
-        throws Exception
-    {
+    public static void main(String[] args) throws Exception
+    {	
         // We need three parameters to do the transmission. For example,
         // ant run-example -Drun.example.name=AVReceive2 -Drun.example.arg.line="--local-port-base=10000 --remote-host=129.130.131.132 --remote-port-base=5000"
+    	
+    	// Injecting command line arguments
+    	args = new String[3];
+    	args[0] = "--local-port-base=10000";
+    	args[1] = "--remote-host=127.0.0.1";
+    	args[2] = "--remote-port-base=5000";
+    	
+    	System.out.print("Starting LibJitsi...");
+    	try {
+    		LibJitsi.start();
+    	} catch(Exception e) {
+    		System.out.println("\nERROR:\n");
+    		e.printStackTrace();
+    		return;
+    	}
+    	
+    	
         if (args.length < 3)
         {
             prUsage();
@@ -337,6 +350,7 @@ public class AVReceive2
         {
             Map<String, String> argMap = AVTransmit2.parseCommandLineArgs(args);
 
+            //System.out.print("Starting LibJitsi...");
             LibJitsi.start();
             try
             {

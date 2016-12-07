@@ -76,15 +76,9 @@ public class AVTransmit2
      * @throws Exception if any error arises during the parsing of the specified
      * <tt>localPortBase</tt>, <tt>remoteHost</tt> and <tt>remotePortBase</tt>
      */
-    private AVTransmit2(
-            String localPortBase,
-            String remoteHost, String remotePortBase)
-        throws Exception
+    private AVTransmit2(String localPortBase, String remoteHost, String remotePortBase) throws Exception
     {
-        this.localPortBase
-            = (localPortBase == null)
-                ? -1
-                : Integer.parseInt(localPortBase);
+        this.localPortBase = (localPortBase == null) ? -1 : Integer.parseInt(localPortBase);
         this.remoteAddr = InetAddress.getByName(remoteHost);
         this.remotePortBase = Integer.parseInt(remotePortBase);
     }
@@ -93,8 +87,7 @@ public class AVTransmit2
      * Starts the transmission. Returns null if transmission started ok.
      * Otherwise it returns a string with the reason why the setup failed.
      */
-    private String start()
-        throws Exception
+    private String start() throws Exception
     {
         /*
          * Prepare for the start of the transmission i.e. initialize the
@@ -115,8 +108,7 @@ public class AVTransmit2
              * instance known to LibJitsi, the first available MediaDevice of
              * the specified MediaType will be chosen by MediaService.
              */
-            MediaDevice device
-                = mediaService.getDefaultDevice(mediaType, MediaUseCase.CALL);
+            MediaDevice device = mediaService.getDefaultDevice(mediaType, MediaUseCase.CALL);
             MediaStream mediaStream = mediaService.createMediaStream(device);
 
             // direction
@@ -337,13 +329,12 @@ public class AVTransmit2
         else
         {
             Map<String, String> argMap = parseCommandLineArgs(args);
-
+            
             LibJitsi.start();
             try
             {
                 // Create a audio transmit object with the specified params.
-                AVTransmit2 at
-                    = new AVTransmit2(
+                AVTransmit2 at = new AVTransmit2(
                             argMap.get(LOCAL_PORT_BASE_ARG_NAME),
                             argMap.get(REMOTE_HOST_ARG_NAME),
                             argMap.get(REMOTE_PORT_BASE_ARG_NAME));

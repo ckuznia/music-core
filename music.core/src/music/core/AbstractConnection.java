@@ -21,8 +21,15 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Clip;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import javafx.scene.media.Media;
+import javafx.scene.media.MediaPlayer;
 
 import music.core.binarytree.BinaryTree;
 
@@ -233,6 +240,100 @@ public abstract class AbstractConnection {
 		writeInt(Message.ACK.ordinal());
 	}
 	
+	protected void test_readStream(String newPath) {
+		final DataInputStream dInput = (DataInputStream) getInput(DataInputStream.class);
+		
+		// Getting file size
+		long fileSize = -1;
+		try {
+			fileSize = dInput.readLong();
+		} catch(IOException e) {
+			log.error("IO Error getting file size from " + socket.getInetAddress(), e);
+			disconnect();
+			return;
+		}
+		
+		// Retrieving file extension
+		String extension = "";
+		try {
+			extension = dInput.readUTF();
+		} catch (IOException e) {
+			log.error("IO Error getting file extension.", e);
+			disconnect();
+			return;
+		}
+		
+		// Creating name for file to be downloaded, name is based on current date and time
+		DateFormat dateFormat = new SimpleDateFormat("MM-dd-yyyy_HH-mm-ss");
+		Date date = new Date();
+		String name = dateFormat.format(date) + extension;
+		
+		try {
+			//fOutput.flush();
+			//bOutput.flush();
+						
+			// For reading the incoming file stream
+			//BufferedInputStream bInput = new BufferedInputStream(socket.getInputStream());
+			
+			log.debug("playing clip:");
+			InputStream in = socket.getInputStream();
+			play(in);
+			
+			//InputStream in = new BufferedInputStream(socket.getInputStream());
+            //play(in);
+			
+			
+			//bOutput.flush();
+			//fOutput.flush();
+			
+			//log.info("==============================================");
+			log.debug("Done.");
+		} catch (EOFException e) {
+			log.error("End of file error.", e);
+			disconnect();
+			return;
+		} catch (IOException e) {
+			log.error("IO error.", e);
+			disconnect();
+			return;
+		} catch (Exception e) {
+			log.error(e);
+			disconnect();
+			return;
+		}
+		
+		// Send acknowledgement
+		writeInt(Message.ACK.ordinal());
+	}
+	
+	public void demoPlaySound(InputStream inputStream) {
+	    try {
+	        AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(inputStream);
+	        Clip clip = AudioSystem.getClip();
+	        clip.open(audioInputStream);
+	        clip.start();
+	    } catch(Exception ex) {
+	        System.out.println("Error with playing sound.");
+	        ex.printStackTrace();
+	    }
+	}
+	
+	private synchronized void play(final InputStream in) throws Exception {
+		AudioInputStream ais = null;
+		try {
+			ais = AudioSystem.getAudioInputStream(new BufferedInputStream(in));
+		} catch(Exception e) {
+			log.error("AudioInputStream FAILED to instantiate:", e);
+		}
+        
+        try (Clip clip = AudioSystem.getClip()) {
+            clip.open(ais);
+            clip.start();
+            Thread.sleep(100); // given clip.drain a chance to start
+            clip.drain();
+        }
+    }
+	
 	protected void writeFile(String filePath) {
 		File file = new File(filePath);
 		
@@ -316,6 +417,93 @@ public abstract class AbstractConnection {
 		} catch (IOException e) {
 			log.error("IO Error.", e);
 			disconnect();
+		}
+		
+		// Wait for acknowledgement
+		readACK();
+	}
+	
+	protected void test_writeStream(String filePath) {
+		File file = new File(filePath);
+		
+		// Making sure the file exists
+		if(!file.exists()) {
+			log.error("Cannot send file. File " + filePath + " does not exist.");
+			disconnect();
+			return;
+		}
+		
+		// Making sure the file isn't above an allowed limit
+		long size = file.length();
+		
+		if(size > MAX_SIZE_ALLOWED) {
+			log.error("File size of " + (size / MEGA_BYTE) + "MB is above the allowed limit of " + MAX_SIZE_ALLOWED + "MB. The file send will be CANCELLED", new Exception("File size too large."));
+			disconnect();
+			return;
+		}
+		
+		// Sending file size
+		DataOutputStream dOutput = (DataOutputStream) getOutput(DataOutputStream.class);
+		try {
+			dOutput.writeLong(size);
+			dOutput.flush();
+		} catch(IOException e) {
+			log.error("IO error sending file size.", e);
+			disconnect();
+			return;
+		}
+		
+		// Sending file extension
+		try {
+			String fileName = file.getName();
+			// Parse file name to find out extension type
+			int dotIndex = fileName.lastIndexOf('.');
+			String extension = "";
+			if(dotIndex != -1) extension = fileName.substring(dotIndex, fileName.length());
+			dOutput.writeUTF(extension);
+			dOutput.flush();
+		} catch(IOException e) {
+			log.error("IO Error when sending file extension.", e);
+			disconnect();
+			return;
+		}
+		
+		try (
+				// The input that feeds into the output stream
+				FileInputStream fInput = new FileInputStream(file);
+				//BufferedInputStream bInput = new BufferedInputStream(fInput)
+			) {
+			log.debug("Streaming file...");
+			
+			// Used for the buffer size
+			int bufferSize = 1024 * 8;
+			byte[] bytes = new byte[bufferSize];
+			
+			// For sending the stream of data
+			//final BufferedOutputStream bOutput = (BufferedOutputStream) getOutput(BufferedOutputStream.class);
+			//bOutput.flush();
+			
+			// Reading the data with read() and sending it with write()
+			// -1 from read() means the end of stream (no more bytes to read)
+			for(int count; (count = fInput.read(bytes)) != -1;) {
+				// count is the number of bytes to write,
+				// 0 is the offset
+				// bytes is the actual data to write
+				socket.getOutputStream().write(bytes, 0, count);
+			}
+			socket.getOutputStream().flush();
+			
+			//log.info("==============================================");
+			log.debug("Done.");
+			
+		} catch (FileNotFoundException e) {
+			log.error("File not found error. ", e);
+			disconnect();
+			return;
+		} catch (IOException e) {
+			log.error("IO Error.", e);
+			disconnect();
+			return;
 		}
 		
 		// Wait for acknowledgement

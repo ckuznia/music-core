@@ -28,9 +28,6 @@ import javax.sound.sampled.Clip;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import javafx.scene.media.Media;
-import javafx.scene.media.MediaPlayer;
-
 import music.core.binarytree.BinaryTree;
 
 public abstract class AbstractConnection {
@@ -104,7 +101,7 @@ public abstract class AbstractConnection {
 		return null;
 	}
 	
-	private int basicReadInt() {
+	protected int basicReadInt() {
 		try {
 			return ((DataInputStream) getInput(DataInputStream.class)).readInt();
 		} catch (EOFException e) {
@@ -275,9 +272,13 @@ public abstract class AbstractConnection {
 			// For reading the incoming file stream
 			//BufferedInputStream bInput = new BufferedInputStream(socket.getInputStream());
 			
-			log.debug("playing clip:");
-			InputStream in = socket.getInputStream();
-			play(in);
+			/*
+			 * BUG: audio file only starts streaming once entire file is downloaded (defeats purpose of streaming)
+			 * 
+			 * Need to use SourceDataLine instead of Clip to play sound, SourceDataLine is for streaming.
+			 * When the client is playing downloaded songs on device, Clip should be used.
+			 */
+			play(socket.getInputStream());
 			
 			//InputStream in = new BufferedInputStream(socket.getInputStream());
             //play(in);
@@ -306,32 +307,26 @@ public abstract class AbstractConnection {
 		writeInt(Message.ACK.ordinal());
 	}
 	
-	public void demoPlaySound(InputStream inputStream) {
-	    try {
-	        AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(inputStream);
-	        Clip clip = AudioSystem.getClip();
-	        clip.open(audioInputStream);
-	        clip.start();
-	    } catch(Exception ex) {
-	        System.out.println("Error with playing sound.");
-	        ex.printStackTrace();
-	    }
-	}
-	
-	private synchronized void play(final InputStream in) throws Exception {
+	private static synchronized void play(final InputStream in) throws Exception {
 		AudioInputStream ais = null;
 		try {
+			log.debug("Instantiating AudioInputStream...");
 			ais = AudioSystem.getAudioInputStream(new BufferedInputStream(in));
+			log.debug("Done.");
+			
+			try (Clip clip = AudioSystem.getClip()) {
+				log.debug("Playing clip...");
+	            clip.open(ais);
+	            clip.start();
+	            Thread.sleep(100); // given clip.drain a chance to start
+	            clip.drain();
+	            log.debug("Done.");
+	        } catch(Exception e) {
+				log.error("AudioInputStream created, but Clip failed to play");
+			}
 		} catch(Exception e) {
 			log.error("AudioInputStream FAILED to instantiate:", e);
 		}
-        
-        try (Clip clip = AudioSystem.getClip()) {
-            clip.open(ais);
-            clip.start();
-            Thread.sleep(100); // given clip.drain a chance to start
-            clip.drain();
-        }
     }
 	
 	protected void writeFile(String filePath) {
@@ -435,7 +430,6 @@ public abstract class AbstractConnection {
 		
 		// Making sure the file isn't above an allowed limit
 		long size = file.length();
-		
 		if(size > MAX_SIZE_ALLOWED) {
 			log.error("File size of " + (size / MEGA_BYTE) + "MB is above the allowed limit of " + MAX_SIZE_ALLOWED + "MB. The file send will be CANCELLED", new Exception("File size too large."));
 			disconnect();
@@ -510,30 +504,28 @@ public abstract class AbstractConnection {
 		readACK();
 	}
 	
-	protected BinaryTree readTree() {
-		// Download each Track object from the tree
+	protected Object readObject() {
 		final ObjectInputStream objIn = (ObjectInputStream) getInput(ObjectInputStream.class);
-		BinaryTree tree = null;
+		Object object = null;
 		try {
-			tree = (BinaryTree) objIn.readObject();
+			object = objIn.readObject();
 		} catch(ClassNotFoundException e) {
 			log.error("Could not find Class.", e);
 		} catch (IOException e) {
 			log.error("IO Exception.", e);
 		}
 		
-		// Send acknowledgement that tree was read
+		// Send acknowledgement that object was read
 		writeInt(Message.ACK.ordinal());
-		return tree;
+		return object;
 	}
 	
-	protected void writeTree(BinaryTree tree) {		
+	protected void writeObject(Object object) {		
 		final ObjectOutputStream objOut = (ObjectOutputStream) getOutput(ObjectOutputStream.class);
 		try {
 			objOut.flush();
 			
-			log.debug("Sending BinaryTree Tracks... ");
-			objOut.writeObject(tree);
+			objOut.writeObject(object);
 			objOut.flush();
 			log.debug("Done.");
 		} catch (IOException e) {

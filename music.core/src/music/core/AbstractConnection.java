@@ -24,6 +24,8 @@ import java.util.Date;
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.Clip;
+import javax.sound.sampled.DataLine;
+import javax.sound.sampled.SourceDataLine;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -237,98 +239,6 @@ public abstract class AbstractConnection {
 		writeInt(Message.ACK.ordinal());
 	}
 	
-	protected void test_readStream(String newPath) {
-		final DataInputStream dInput = (DataInputStream) getInput(DataInputStream.class);
-		
-		// Getting file size
-		long fileSize = -1;
-		try {
-			fileSize = dInput.readLong();
-		} catch(IOException e) {
-			log.error("IO Error getting file size from " + socket.getInetAddress(), e);
-			disconnect();
-			return;
-		}
-		
-		// Retrieving file extension
-		String extension = "";
-		try {
-			extension = dInput.readUTF();
-		} catch (IOException e) {
-			log.error("IO Error getting file extension.", e);
-			disconnect();
-			return;
-		}
-		
-		// Creating name for file to be downloaded, name is based on current date and time
-		DateFormat dateFormat = new SimpleDateFormat("MM-dd-yyyy_HH-mm-ss");
-		Date date = new Date();
-		String name = dateFormat.format(date) + extension;
-		
-		try {
-			//fOutput.flush();
-			//bOutput.flush();
-						
-			// For reading the incoming file stream
-			//BufferedInputStream bInput = new BufferedInputStream(socket.getInputStream());
-			
-			/*
-			 * BUG: audio file only starts streaming once entire file is downloaded (defeats purpose of streaming)
-			 * 
-			 * Need to use SourceDataLine instead of Clip to play sound, SourceDataLine is for streaming.
-			 * When the client is playing downloaded songs on device, Clip should be used.
-			 */
-			play(socket.getInputStream());
-			
-			//InputStream in = new BufferedInputStream(socket.getInputStream());
-            //play(in);
-			
-			
-			//bOutput.flush();
-			//fOutput.flush();
-			
-			//log.info("==============================================");
-			log.debug("Done.");
-		} catch (EOFException e) {
-			log.error("End of file error.", e);
-			disconnect();
-			return;
-		} catch (IOException e) {
-			log.error("IO error.", e);
-			disconnect();
-			return;
-		} catch (Exception e) {
-			log.error(e);
-			disconnect();
-			return;
-		}
-		
-		// Send acknowledgement
-		writeInt(Message.ACK.ordinal());
-	}
-	
-	private static synchronized void play(final InputStream in) throws Exception {
-		AudioInputStream ais = null;
-		try {
-			log.debug("Instantiating AudioInputStream...");
-			ais = AudioSystem.getAudioInputStream(new BufferedInputStream(in));
-			log.debug("Done.");
-			
-			try (Clip clip = AudioSystem.getClip()) {
-				log.debug("Playing clip...");
-	            clip.open(ais);
-	            clip.start();
-	            Thread.sleep(100); // given clip.drain a chance to start
-	            clip.drain();
-	            log.debug("Done.");
-	        } catch(Exception e) {
-				log.error("AudioInputStream created, but Clip failed to play");
-			}
-		} catch(Exception e) {
-			log.error("AudioInputStream FAILED to instantiate:", e);
-		}
-    }
-	
 	protected void writeFile(String filePath) {
 		File file = new File(filePath);
 		
@@ -416,6 +326,129 @@ public abstract class AbstractConnection {
 		
 		// Wait for acknowledgement
 		readACK();
+	}
+	
+	protected void test_readStream(String newPath) {
+		final DataInputStream dInput = (DataInputStream) getInput(DataInputStream.class);
+		
+		// Getting file size
+		long fileSize = -1;
+		try {
+			fileSize = dInput.readLong();
+		} catch(IOException e) {
+			log.error("IO Error getting file size from " + socket.getInetAddress(), e);
+			disconnect();
+			return;
+		}
+		
+		// Retrieving file extension
+		String extension = "";
+		try {
+			extension = dInput.readUTF();
+		} catch (IOException e) {
+			log.error("IO Error getting file extension.", e);
+			disconnect();
+			return;
+		}
+		
+		// Creating name for file to be downloaded, name is based on current date and time
+		DateFormat dateFormat = new SimpleDateFormat("MM-dd-yyyy_HH-mm-ss");
+		Date date = new Date();
+		String name = dateFormat.format(date) + extension;
+		
+		try {
+			//fOutput.flush();
+			//bOutput.flush();
+						
+			// For reading the incoming file stream
+			//BufferedInputStream bInput = new BufferedInputStream(socket.getInputStream());
+			
+			/*
+			 * BUG: audio file only starts streaming once entire file is downloaded (defeats purpose of streaming)
+			 * 
+			 * Need to use SourceDataLine instead of Clip to play sound, SourceDataLine is for streaming.
+			 * When the client is playing downloaded songs on device, Clip should be used.
+			 */
+			playRemote(socket.getInputStream());
+			//playLocal(socket.getInputStream());
+			
+			//InputStream in = new BufferedInputStream(socket.getInputStream());
+            //play(in);
+			
+			
+			//bOutput.flush();
+			//fOutput.flush();
+			
+			//log.info("==============================================");
+			log.debug("Done.");
+		} catch (EOFException e) {
+			log.error("End of file error.", e);
+			disconnect();
+			return;
+		} catch (IOException e) {
+			log.error("IO error.", e);
+			disconnect();
+			return;
+		} catch (Exception e) {
+			log.error(e);
+			disconnect();
+			return;
+		}
+		
+		// Send acknowledgement
+		writeInt(Message.ACK.ordinal());
+	}
+	
+	private static synchronized void playLocal(final InputStream in) throws Exception {
+		AudioInputStream ais = null;
+		try {
+			log.debug("Instantiating AudioInputStream...");
+			
+			//ais = AudioSystem.getAudioInputStream(in); // Gives java.io.IOException: mark/reset not supported
+			ais = AudioSystem.getAudioInputStream(new BufferedInputStream(in)); // Worked with file C:/mnt/ext500GB/server/test.wav
+			
+			log.debug("Done.");
+			
+			try (Clip clip = AudioSystem.getClip()) {
+				log.debug("Playing clip...");
+	            clip.open(ais);
+	            clip.start();
+	            Thread.sleep(100); // given clip.drain a chance to start
+	            clip.drain();
+	            log.debug("Done.");
+	        } catch(Exception e) {
+				log.error("AudioInputStream created, but Clip failed to play");
+			}
+		} catch(Exception e) {
+			log.error("AudioInputStream FAILED to instantiate:", e);
+		}
+    }
+	
+	public void playRemote(final InputStream in) {
+		try {
+			log.debug("Instantiating AudioInputStream...");
+			AudioInputStream ais = AudioSystem.getAudioInputStream(new BufferedInputStream(in));
+			log.debug("Done with AudioInputStream. TEST");
+			
+			DataLine.Info info = new DataLine.Info(SourceDataLine.class, ais.getFormat());
+			SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
+			line.open(ais.getFormat());
+			 
+			int bytesread = 0;
+			byte[] buffer = new byte[3 * 1024 * ais.getFormat().getFrameSize()];
+			while(bytesread != -1)
+			{
+			    bytesread = ais.read(buffer,0, buffer.length);
+			    if (bytesread >= 0)  line.write(buffer, 0, bytesread);
+			    if (!line.isRunning()) line.start();
+			}
+			line.drain();
+			line.stop();
+			line.close();
+			ais.close();
+		} catch(Exception e) {
+			log.error("ERROR in playRemote", e);
+		}
 	}
 	
 	protected void test_writeStream(String filePath) {

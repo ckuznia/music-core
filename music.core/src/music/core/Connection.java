@@ -40,6 +40,8 @@ public class Connection {
 	private final ArrayList<InputStream> inStreams = new ArrayList<InputStream>();
 	private final ArrayList<OutputStream> outStreams = new ArrayList<OutputStream>();
 	
+	private volatile int offset = 0;
+	
 	public Connection(Socket socket) {
 		this.socket = socket;
 		
@@ -242,7 +244,8 @@ public class Connection {
 		}
 		
 		// If client is not intending to stream the data, the file size and file extension
-		// data will be sent, otherwise skip these steps.
+		// data will be sent. Otherwise skip these steps and setup a second thread to listen
+		// for data while a streaming file.
 		if(!streaming) {
 			// Sending file size
 			try {
@@ -268,6 +271,42 @@ public class Connection {
 				disconnect();
 				return;
 			}
+		} else {
+			/* Since the current thread will block due to writing a file to the output stream 
+			 * a second thread is created. This thread listens to the connection in order
+			 * to be told what part of the file the client wishes to stream.
+			 */
+			Thread offsetUpdater = new Thread(new Runnable() {
+
+				@Override
+				public void run() {
+					while(offset != -1) {
+						updateOffset();
+					}
+				}
+				
+				/**
+				 * Used for streaming purposes only. Updates the index
+				 * of where to start streaming in a file.
+				 */
+				private void updateOffset() {
+					try {
+						// Read number for how many bytes into the file to stream
+						offset = ((DataInputStream) getInput(DataInputStream.class)).readInt();
+					} catch (EOFException e) {
+						log.error("Read reached end of stream before finished reading from " + socket.getInetAddress(), e);
+						disconnect();
+					} catch(IOException e) {
+						log.error("IO error when awaiting message from " + socket.getInetAddress(), e);
+						disconnect();
+					} catch(NullPointerException e) {
+						log.error(e);
+						disconnect();
+					}
+				}
+				
+			});
+			offsetUpdater.start();
 		}
 		
 		try (
@@ -283,16 +322,19 @@ public class Connection {
 			final BufferedOutputStream bOutput = (BufferedOutputStream) getOutput(BufferedOutputStream.class);
 			bOutput.flush();
 			
-			log.debug("Sending " + (fileSize / 1000.0) + "kb file...");
+			if(streaming) log.debug("Streaming file...");
+			else log.debug("Sending " + (fileSize / 1000.0) + "kb file...");
 			
 			// Reading the data with read() and sending it with write()
 			// -1 from read() means the end of stream (no more bytes to read)
-			for(int count; (count = bInput.read(bytes)) != -1;) {
+			// -1 from offset means the client wishes to terminate streaming
+			for(int count; (count = bInput.read(bytes)) != -1 && offset != -1;) {
 				// bytes is the actual data to write,
-				// 0 is the offset,
+				// offset is the offset (byte index of where to start in the file)
 				// count is the number of bytes to write
-				bOutput.write(bytes, 0, count);
+				bOutput.write(bytes, offset, count);
 			}
+			offset = -1; // This will effectively close the offset updater thread.
 			bOutput.flush();
 			
 			log.debug("Done.");

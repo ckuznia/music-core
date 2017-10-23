@@ -14,7 +14,6 @@ import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
-import java.net.InetAddress;
 import java.net.Socket;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -26,30 +25,22 @@ import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.Clip;
 import javax.sound.sampled.DataLine;
 import javax.sound.sampled.SourceDataLine;
-import javax.sound.sampled.UnsupportedAudioFileException;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import music.core.binarytree.BinaryTree;
+public class Connection {
 
-public abstract class AbstractConnection {
-
-	private static final Logger log = LogManager.getLogger(AbstractConnection.class);
-	
-	// Different messages clients can send to the server, these messages refer to specific commands
-	protected enum Message {DISCONNECT, ACK, LIBRARY, DATABASE_ADD, DATABASE_RETRIEVE, DATABASE_STREAM};
+	private static final Logger log = LogManager.getLogger(Connection.class);
 	
 	private final Socket socket;
-	// TODO: add second socket. Each connection should be a pair of sockets, one for sending byte
-	// data (streaming/downloading/etc), another for all other data.
 	
 	// Lists for input and output streams that are used (besides the basic InputStream/OutputStream).
 	// Storing them in a list and closing them in a loop ensures all streams have been closed.
 	private final ArrayList<InputStream> inStreams = new ArrayList<InputStream>();
 	private final ArrayList<OutputStream> outStreams = new ArrayList<OutputStream>();
 	
-	public AbstractConnection(Socket socket) {
+	public Connection(Socket socket) {
 		this.socket = socket;
 		
 		try {
@@ -104,9 +95,11 @@ public abstract class AbstractConnection {
 		return null;
 	}
 	
-	protected int basicReadInt() {
+	public Command readCommand() {
+		// Read integer like normal
+		int value = -1;
 		try {
-			return ((DataInputStream) getInput(DataInputStream.class)).readInt();
+			value = ((DataInputStream) getInput(DataInputStream.class)).readInt();
 		} catch (EOFException e) {
 			log.error("Read reached end of stream before finished reading from " + socket.getInetAddress(), e);
 			disconnect();
@@ -117,10 +110,19 @@ public abstract class AbstractConnection {
 			log.error(e);
 			disconnect();
 		}
-		return -1;
+		
+		// If value read is not an acknowledgement
+		if(value != Command.ACK.ordinal()) {
+			// Send an acknowledgement that the value was read
+			writeCommand(Command.ACK);
+		}
+		// Returns the command associated with that ordinal
+		return Command.values()[value];
 	}
 	
-	private void basicWriteInt(int value) {
+	public void writeCommand(Command command) {
+		int value = command.ordinal();
+		// Send integer
 		final DataOutputStream out = (DataOutputStream) getOutput(DataOutputStream.class);
 		try {
 			out.flush();
@@ -134,40 +136,27 @@ public abstract class AbstractConnection {
 			log.error("Error sending integer [" + value + "] to [" + socket.getInetAddress() + "].", e);
 			disconnect();
 		}
-	}
-	
-	protected int readInt() {
-		// Read integer like normal
-		int value = basicReadInt();
-		
-		// If value read is not an acknowledgement
-		if(value != Message.ACK.ordinal()) {
-			// Send an acknowledgement that value was read
-			basicWriteInt(Message.ACK.ordinal());
-		}
-		return value;
-	}
-	
-	protected void writeInt(int value) {
-		// Send integer like normal
-		basicWriteInt(value);
 		
 		// If value sent is not an acknowledgement
-		if(value != Message.ACK.ordinal()) {
+		if(value != Command.ACK.ordinal()) {
 			// Wait for acknowledgement
 			readACK();
 		}	
 	}
 	
-	protected void readACK() {
-		int value = basicReadInt();
-		if(value != Message.ACK.ordinal()) {
-			log.error("ACK is incorrect, got " + value);
+	/**
+	 * Used to consume the ACK expected to be sent, also verifies if 
+	 * value sent was an ACK.
+	 */
+	private void readACK() {
+		Command command = readCommand();
+		if(!command.equals(Command.ACK)) {
+			log.error("ACK is incorrect, got " + command);
 			disconnect();
 		}
 	}
 	
-	protected void readFile(String newPath) {
+	public void readFile(String newPath) {
 		// For reading file size and file extension
 		final DataInputStream dInput = (DataInputStream) getInput(DataInputStream.class);
 		
@@ -236,10 +225,10 @@ public abstract class AbstractConnection {
 		}
 		
 		// Send acknowledgement
-		writeInt(Message.ACK.ordinal());
+		writeCommand(Command.ACK);
 	}
 	
-	protected void writeFile(String filePath, boolean streaming) {
+	public void writeFile(String filePath, boolean streaming) {
 		// For sending file size and file extension
 		DataOutputStream dOutput = (DataOutputStream) getOutput(DataOutputStream.class);
 		File file = new File(filePath);
@@ -319,12 +308,17 @@ public abstract class AbstractConnection {
 		readACK();
 	}
 	
-	protected synchronized void playLocal() {
+	protected synchronized void playLocal(File file) {
+		
+		/*
+		 * This is a bare-bones basic example for playing files locally,
+		 * need to cover all specific types of exceptions instead of a
+		 * general catch clause. Also will need to incorporate stop, play, skipping forward, etc.
+		 */
+		
 		AudioInputStream ais = null;
 		try {
-			// TODO: This will not use sockets if playing locally, FileInputStream most
-			// likely what will be used
-			ais = AudioSystem.getAudioInputStream(new BufferedInputStream(socket.getInputStream())); 
+			ais = AudioSystem.getAudioInputStream(new BufferedInputStream(new FileInputStream(file))); 
 			try (Clip clip = AudioSystem.getClip()) {
 				log.debug("Playing clip...");
 	            clip.open(ais);
@@ -340,7 +334,7 @@ public abstract class AbstractConnection {
 		}
     }
 	
-	protected synchronized void stream() {
+	public void stream() {
 		try (
 				// For streaming the incoming bytes
 				BufferedInputStream bis = new BufferedInputStream(socket.getInputStream());
@@ -376,10 +370,10 @@ public abstract class AbstractConnection {
 		}
 		
 		// Send acknowledgement
-		writeInt(Message.ACK.ordinal());
+		writeCommand(Command.ACK);
 	}
 	
-	protected Object readObject() {
+	public Object readObject() {
 		final ObjectInputStream objIn = (ObjectInputStream) getInput(ObjectInputStream.class);
 		Object object = null;
 		try {
@@ -391,11 +385,11 @@ public abstract class AbstractConnection {
 		}
 		
 		// Send acknowledgement that object was read
-		writeInt(Message.ACK.ordinal());
+		writeCommand(Command.ACK);
 		return object;
 	}
 	
-	protected void writeObject(Object object) {		
+	public void writeObject(Object object) {		
 		final ObjectOutputStream objOut = (ObjectOutputStream) getOutput(ObjectOutputStream.class);
 		try {
 			objOut.flush();
@@ -411,9 +405,9 @@ public abstract class AbstractConnection {
 		readACK();
 	}
 	
-	public synchronized void disconnect() {
+	public void disconnect() {
 		// Disconnect only if the connection has not been closed
-		if(isClosed()) return;
+		if(socket.isClosed()) return;
 		
 		log.debug("*** Disconnecting from " + socket.getInetAddress() + " ***");
 		
@@ -447,11 +441,7 @@ public abstract class AbstractConnection {
 		log.debug("*** Done with " + socket.getInetAddress() + " ***");
 	}
 	
-	public boolean isClosed() {
-		return socket.isClosed();
-	}
-	
-	public InetAddress getInetAddress() {
-		return socket.getInetAddress();
+	public String getHostAddress() {
+		return socket.getInetAddress().getHostAddress();
 	}
 }

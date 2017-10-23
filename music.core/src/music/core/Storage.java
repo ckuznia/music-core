@@ -18,7 +18,7 @@ import music.core.binarytree.Node;
 public class Storage {
 	
 	private static final Logger log = LogManager.getLogger(Storage.class);
-		
+	
 	private final File database; // The actual database
 	private final File download; // A staging folder before files are placed into the database
 	private final BinaryTree tree;

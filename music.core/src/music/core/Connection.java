@@ -97,8 +97,7 @@ public class Connection {
 		return null;
 	}
 	
-	public Command readCommand() {
-		// Read integer like normal
+	private int readInt() {
 		int value = -1;
 		try {
 			value = ((DataInputStream) getInput(DataInputStream.class)).readInt();
@@ -112,18 +111,10 @@ public class Connection {
 			log.error(e);
 			disconnect();
 		}
-		
-		// If value read is not an acknowledgement
-		if(value != Command.ACK.ordinal()) {
-			// Send an acknowledgement that the value was read
-			writeCommand(Command.ACK);
-		}
-		// Returns the command associated with that ordinal
-		return Command.values()[value];
+		return value;
 	}
 	
-	public void writeCommand(Command command) {
-		int value = command.ordinal();
+	public void writeInt(int value) {
 		// Send integer
 		final DataOutputStream out = (DataOutputStream) getOutput(DataOutputStream.class);
 		try {
@@ -138,6 +129,24 @@ public class Connection {
 			log.error("Error sending integer [" + value + "] to [" + socket.getInetAddress() + "].", e);
 			disconnect();
 		}
+	}
+	
+	public Command readCommand() {
+		// Read integer like normal
+		int value = readInt();
+		
+		// If value read is not an acknowledgement
+		if(value != Command.ACK.ordinal()) {
+			// Send an acknowledgement that the value was read
+			writeCommand(Command.ACK);
+		}
+		// Returns the command associated with that ordinal
+		return Command.values()[value];
+	}
+	
+	public void writeCommand(Command command) {
+		int value = command.ordinal();
+		writeInt(value);
 		
 		// If value sent is not an acknowledgement
 		if(value != Command.ACK.ordinal()) {
@@ -150,7 +159,7 @@ public class Connection {
 	 * Used to consume the ACK expected to be sent, also verifies if 
 	 * value sent was an ACK.
 	 */
-	private void readACK() {
+	public void readACK() {
 		Command command = readCommand();
 		if(!command.equals(Command.ACK)) {
 			log.error("ACK is incorrect, got " + command);
@@ -159,195 +168,187 @@ public class Connection {
 	}
 	
 	public void readFile(String newPath) {
-		// For reading file size and file extension
-		final DataInputStream dInput = (DataInputStream) getInput(DataInputStream.class);
-		
-		// Retrieving file size
-		long fileSize = -1;
-		try {
-			fileSize = dInput.readLong();
-		} catch(IOException e) {
-			log.error("IO Error getting file size from " + socket.getInetAddress(), e);
-			disconnect();
-			return;
-		}
-		
-		// Retrieving file extension
-		String extension = "";
-		try {
-			extension = dInput.readUTF();
-		} catch (IOException e) {
-			log.error("IO Error getting file extension.", e);
-			disconnect();
-			return;
-		}
-		
-		// Creating name for file to be downloaded, name is based on current date and time
-		// The file will be renamed after processed by Storage.
-		DateFormat dateFormat = new SimpleDateFormat("MM-dd-yyyy_HH-mm-ss");
-		Date date = new Date();
-		String name = dateFormat.format(date) + extension;
-		
-		try(
-			// For writing the incoming file to the hard drive
-			FileOutputStream fOutput = new FileOutputStream(newPath + "/" + name);
-			BufferedOutputStream bOutput = new BufferedOutputStream(fOutput)
-		) {
-			fOutput.flush();
-			bOutput.flush();
-						
-			// For reading the incoming file
-			BufferedInputStream bInput = (BufferedInputStream) getInput(BufferedInputStream.class);
-			
-			// Declaring buffer size
-			int bufferSize = 1024 * 8;
-			byte[] bytes = new byte[bufferSize];
-			
-			log.debug("Downloading " + (fileSize / 1000.0) + "kb file...");
-			
-			// Reading from the input stream and saving to a file	
-			int bytesReceived = 0;
-			for(int count; bytesReceived < fileSize && (count = bInput.read(bytes)) != -1;) {
-				// bytes is the actual data to write,
-				// 0 is the offset,
-				// count is the number of bytes to write
-				bOutput.write(bytes, 0, count);
-				bytesReceived += count;
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				// For reading file size and file extension
+				final DataInputStream dInput = (DataInputStream) getInput(DataInputStream.class);
+				
+				// Retrieving file size
+				long fileSize = -1;
+				try {
+					fileSize = dInput.readLong();
+				} catch(IOException e) {
+					log.error("IO Error getting file size from " + socket.getInetAddress(), e);
+					disconnect();
+					return;
+				}
+				
+				// Retrieving file extension
+				String extension = "";
+				try {
+					extension = dInput.readUTF();
+				} catch (IOException e) {
+					log.error("IO Error getting file extension.", e);
+					disconnect();
+					return;
+				}
+				
+				// Creating name for file to be downloaded, name is based on current date and time
+				// The file will be renamed after processed by Storage.
+				DateFormat dateFormat = new SimpleDateFormat("MM-dd-yyyy_HH-mm-ss");
+				Date date = new Date();
+				String name = dateFormat.format(date) + extension;
+				
+				try(
+					// For writing the incoming file to the hard drive
+					FileOutputStream fOutput = new FileOutputStream(newPath + "/" + name);
+					BufferedOutputStream bOutput = new BufferedOutputStream(fOutput)
+				) {
+					fOutput.flush();
+					bOutput.flush();
+								
+					// For reading the incoming file
+					BufferedInputStream bInput = (BufferedInputStream) getInput(BufferedInputStream.class);
+					
+					// Declaring buffer size
+					int bufferSize = 1024 * 8;
+					byte[] bytes = new byte[bufferSize];
+					
+					log.debug("Downloading " + (fileSize / 1000.0) + "kb file...");
+					
+					// Reading from the input stream and saving to a file	
+					int bytesReceived = 0;
+					for(int count; bytesReceived < fileSize && (count = bInput.read(bytes)) != -1;) {
+						// bytes is the actual data to write,
+						// 0 is the offset,
+						// count is the number of bytes to write
+						bOutput.write(bytes, 0, count);
+						bytesReceived += count;
+					}
+					bOutput.flush();
+					fOutput.flush();
+					
+					log.debug("Done.");
+				} catch (EOFException e) {
+					log.error("End of file error.", e);
+					disconnect();
+				} catch (IOException e) {
+					log.error("IO error.", e);
+					disconnect();
+				}
+				
+				// Send acknowledgement
+				writeCommand(Command.ACK);
 			}
-			bOutput.flush();
-			fOutput.flush();
-			
-			log.debug("Done.");
-		} catch (EOFException e) {
-			log.error("End of file error.", e);
-			disconnect();
-		} catch (IOException e) {
-			log.error("IO error.", e);
-			disconnect();
-		}
-		
-		// Send acknowledgement
-		writeCommand(Command.ACK);
+		}).start();
 	}
 	
 	public void writeFile(String filePath, boolean streaming) {
-		// For sending file size and file extension
-		DataOutputStream dOutput = (DataOutputStream) getOutput(DataOutputStream.class);
-		File file = new File(filePath);
-		long fileSize = file.length();
-		
-		// Making sure the file exists
-		if(!file.exists()) {
-			log.error("Cannot send file. File " + filePath + " does not exist.");
-			disconnect();
-			return;
-		}
-		
-		// If client is not intending to stream the data, the file size and file extension
-		// data will be sent. Otherwise skip these steps and setup a second thread to listen
-		// for data while a streaming file.
-		if(!streaming) {
-			// Sending file size
-			try {
-				dOutput.writeLong(fileSize);
-				dOutput.flush();
-			} catch(IOException e) {
-				log.error("IO error sending file size.", e);
-				disconnect();
-				return;
-			}
-			
-			// Sending file extension
-			try {
-				String fileName = file.getName();
-				// Parse file name to find out extension type
-				int dotIndex = fileName.lastIndexOf('.');
-				String extension = "";
-				if(dotIndex != -1) extension = fileName.substring(dotIndex, fileName.length());
-				dOutput.writeUTF(extension);
-				dOutput.flush();
-			} catch(IOException e) {
-				log.error("IO Error when parsing & sending file extension.", e);
-				disconnect();
-				return;
-			}
-		} else {
-			/* Since the current thread will block due to writing a file to the output stream 
-			 * a second thread is created. This thread listens to the connection in order
-			 * to be told what part of the file the client wishes to stream.
-			 */
-			Thread offsetUpdater = new Thread(new Runnable() {
-
-				@Override
-				public void run() {
-					while(offset != -1) {
-						updateOffset();
-					}
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				// TODO Auto-generated method stub
+				// For sending file size and file extension
+				DataOutputStream dOutput = (DataOutputStream) getOutput(DataOutputStream.class);
+				File file = new File(filePath);
+				long fileSize = file.length();
+				
+				// Making sure the file exists
+				if(!file.exists()) {
+					log.error("Cannot send file. File " + filePath + " does not exist.");
+					disconnect();
+					return;
 				}
 				
-				/**
-				 * Used for streaming purposes only. Updates the index
-				 * of where to start streaming in a file.
-				 */
-				private void updateOffset() {
+				// If client is not intending to stream the data, the file size and file extension
+				// data will be sent. Otherwise skip these steps and setup a second thread to listen
+				// for data while a streaming file.
+				if(!streaming) {
+					// Sending file size
 					try {
-						// Read number for how many bytes into the file to stream
-						offset = ((DataInputStream) getInput(DataInputStream.class)).readInt();
-					} catch (EOFException e) {
-						log.error("Read reached end of stream before finished reading from " + socket.getInetAddress(), e);
-						disconnect();
+						dOutput.writeLong(fileSize);
+						dOutput.flush();
 					} catch(IOException e) {
-						log.error("IO error when awaiting message from " + socket.getInetAddress(), e);
+						log.error("IO error sending file size.", e);
 						disconnect();
-					} catch(NullPointerException e) {
-						log.error(e);
-						disconnect();
+						return;
 					}
+					
+					// Sending file extension
+					try {
+						String fileName = file.getName();
+						// Parse file name to find out extension type
+						int dotIndex = fileName.lastIndexOf('.');
+						String extension = "";
+						if(dotIndex != -1) extension = fileName.substring(dotIndex, fileName.length());
+						dOutput.writeUTF(extension);
+						dOutput.flush();
+					} catch(IOException e) {
+						log.error("IO Error when parsing & sending file extension.", e);
+						disconnect();
+						return;
+					}
+				} else {
+					/* Since the current thread will block due to writing a file to the output stream 
+					 * a second thread is created. This thread listens to the connection in order
+					 * to be told what part of the file the client wishes to stream.
+					 */
+					Thread offsetUpdater = new Thread(new Runnable() {
+
+						@Override
+						public void run() {
+							while(offset != -1) {
+								// Read number for how many bytes into the file to stream
+								offset = readInt();
+							}
+						}
+					});
+					offsetUpdater.start();
 				}
 				
-			});
-			offsetUpdater.start();
-		}
-		
-		try (
-				// For reading the file in RAM
-				FileInputStream fInput = new FileInputStream(file);
-				BufferedInputStream bInput = new BufferedInputStream(fInput)
-			) {			
-			// Declaring buffer size
-			int bufferSize = 1024 * 8;
-			byte[] bytes = new byte[bufferSize];
-			
-			// For writing the file to the output stream
-			final BufferedOutputStream bOutput = (BufferedOutputStream) getOutput(BufferedOutputStream.class);
-			bOutput.flush();
-			
-			if(streaming) log.debug("Streaming file...");
-			else log.debug("Sending " + (fileSize / 1000.0) + "kb file...");
-			
-			// Reading the data with read() and sending it with write()
-			// -1 from read() means the end of stream (no more bytes to read)
-			// -1 from offset means the client wishes to terminate streaming
-			for(int count; (count = bInput.read(bytes)) != -1 && offset != -1;) {
-				// bytes is the actual data to write,
-				// offset is the offset (byte index of where to start in the file)
-				// count is the number of bytes to write
-				bOutput.write(bytes, offset, count);
+				try (
+						// For reading the file in RAM
+						FileInputStream fInput = new FileInputStream(file);
+						BufferedInputStream bInput = new BufferedInputStream(fInput)
+					) {			
+					// Declaring buffer size
+					int bufferSize = 1024 * 8;
+					byte[] bytes = new byte[bufferSize];
+					
+					// For writing the file to the output stream
+					final BufferedOutputStream bOutput = (BufferedOutputStream) getOutput(BufferedOutputStream.class);
+					bOutput.flush();
+					
+					if(streaming) log.debug("Streaming file...");
+					else log.debug("Sending " + (fileSize / 1000.0) + "kb file...");
+					
+					// Reading the data with read() and sending it with write()
+					// -1 from read() means the end of stream (no more bytes to read)
+					// -1 from offset means the client wishes to terminate streaming
+					for(int count; (count = bInput.read(bytes)) != -1 && offset != -1;) {
+						// bytes is the actual data to write,
+						// offset is the offset (byte index of where to start in the file)
+						// count is the number of bytes to write
+						bOutput.write(bytes, offset, count);
+					}
+					bOutput.flush();
+					
+					log.debug("Done.");
+				} catch (FileNotFoundException e) {
+					log.error("File not found error. ", e);
+					disconnect();
+				} catch (IOException e) {
+					log.error("IO Error.", e);
+					disconnect();
+				} finally {
+					offset = -1; // This will effectively close the offset updater thread.
+				}
+				
+				// Wait for acknowledgement
+				readACK();
 			}
-			offset = -1; // This will effectively close the offset updater thread.
-			bOutput.flush();
-			
-			log.debug("Done.");
-		} catch (FileNotFoundException e) {
-			log.error("File not found error. ", e);
-			disconnect();
-		} catch (IOException e) {
-			log.error("IO Error.", e);
-			disconnect();
-		}
-		
-		// Wait for acknowledgement
-		readACK();
+		}).start();
 	}
 	
 	protected synchronized void playLocal(File file) {
